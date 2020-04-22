@@ -16,6 +16,7 @@ use PhpParser\Node\Stmt\Return_;
 use PhpParser\NodeFinder;
 use PhpParser\ParserFactory;
 use PhpParser\PrettyPrinter\Standard;
+use Shyim\Hooks\Event\AfterHook;
 use Shyim\Hooks\Event\BeforeHook;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
@@ -70,6 +71,7 @@ class HookBuilder
             /** @var ClassMethod $method */
             foreach ($methods as $method) {
                 $name = (string) $method->name;
+                $canHaveReturn = $method->returnType instanceof Identifier && $method->returnType->name === 'void';
 
                 if ($name === '__construct' && !$didAddedConstructor) {
                     $param = $builder->param('shyimEventDispatcher')->getNode();
@@ -78,7 +80,21 @@ class HookBuilder
                     $method->stmts[] = new Expression(new Assign($propertyFetch, $builder->var('shyimEventDispatcher')));
                     $didAddedConstructor = true;
                 } else {
-                    $arg = $builder->new('\\' . BeforeHook::class, [$builder->funcCall('func_get_args')]);
+                    // After Event
+                    $returnStmts = $nodeFinder->findInstanceOf($method->stmts, Return_::class);
+
+                    /** @var Return_ $returnStmt */
+                    foreach ($returnStmts as $returnStmt) {
+                        $originalValue = $returnStmt->expr;
+
+                        $arg = $builder->new('\\' . AfterHook::class, [$builder->funcCall('func_get_args'), $builder->var('this'), $originalValue]);
+                        $eventName = $className . '::' . (string) $method->name . '::after';
+
+                        $returnStmt->expr = $builder->methodCall($builder->methodCall($propertyFetch, 'dispatch', [$arg, new String_($eventName)]), 'getReturn');
+                    }
+
+                    // Before Event
+                    $arg = $builder->new('\\' . BeforeHook::class, [$builder->funcCall('func_get_args'), $builder->var('this')]);
                     $eventName = $className . '::' . (string) $method->name . '::before';
 
                     $event = $builder->var('shyimEventDispatcherEvent');
@@ -86,12 +102,21 @@ class HookBuilder
 
                     $ret = new Return_($builder->methodCall($event, 'getReturn'));
 
-                    if ($method->returnType instanceof Identifier && $method->returnType->name === 'void') {
+                    if ($canHaveReturn) {
                         $ret = new Return_();
                     }
 
                     $condition = new If_($builder->methodCall($event, 'hasReturn'));
                     $condition->stmts = [$ret];
+
+                    foreach ($method->params as $i => $param) {
+                        $paramCondition = new If_($builder->methodCall($event, 'hasArgument', [$i]));
+                        $paramCondition->stmts = [
+                            new Expression(new Assign($param->var, $builder->methodCall($event, 'getArgument', [$i])))
+                        ];
+
+                        array_unshift($method->stmts, $paramCondition);
+                    }
 
                     array_unshift($method->stmts, $condition);
                     array_unshift($method->stmts, $newStmt);

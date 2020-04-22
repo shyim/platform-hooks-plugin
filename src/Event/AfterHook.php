@@ -2,8 +2,11 @@
 
 namespace Shyim\Hooks\Event;
 
-use Symfony\Contracts\EventDispatcher\Event;
-
-class AfterHook extends Event
+class AfterHook extends BeforeHook
 {
+    public function __construct(array $arguments, object $subject, $return)
+    {
+        parent::__construct($arguments, $subject);
+        $this->setReturn($return);
+    }
 }
