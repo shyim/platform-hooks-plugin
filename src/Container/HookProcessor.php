@@ -8,9 +8,9 @@ use Symfony\Component\DependencyInjection\Compiler\CompilerPassInterface;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Reference;
 
-class ContainerProcessor implements CompilerPassInterface
+class HookProcessor implements CompilerPassInterface
 {
-    public function process(ContainerBuilder $container)
+    public function process(ContainerBuilder $container): void
     {
         $neededHooksForClasses = [];
 
@@ -18,7 +18,7 @@ class ContainerProcessor implements CompilerPassInterface
             $def = $container->getDefinition($id);
             $class = $def->getClass();
             if (!isset(class_implements($class)[HookSubscriber::class])) {
-                throw new \RuntimeException(sprintf('Subscriber "%s" needs to extend from %s', $id, HookSubscriber::class));
+                throw new \RuntimeException(\sprintf('Subscriber "%s" needs to extend from %s', $id, HookSubscriber::class));
             }
 
             $def->addTag('kernel.event_subscriber');
@@ -29,7 +29,7 @@ class ContainerProcessor implements CompilerPassInterface
                 $class = explode('::', $method)[0];
 
                 if (!class_exists($class)) {
-                    throw new \RuntimeException(sprintf('Found invalid "%s" subscribe in subscriber "%s": Class does not exists', $method, $id));
+                    throw new \RuntimeException(\sprintf('Found invalid "%s" subscribe in subscriber "%s": Class does not exists', $method, $id));
                 }
 
                 if (!isset($neededHooksForClasses[$class])) {
@@ -38,22 +38,18 @@ class ContainerProcessor implements CompilerPassInterface
             }
         }
 
-        $needRefresh = (new HookBuilder($container->getParameter('kernel.cache_dir')))->build($neededHooksForClasses);
+        (new HookBuilder($container->getParameter('kernel.cache_dir')))->build($neededHooksForClasses);
 
-        foreach ($container->getDefinitions() as $definition) {
+        foreach ($container->getDefinitions() as $id => $definition) {
             if (isset($neededHooksForClasses[$definition->getClass()])) {
+                if ($definition->getClass() === null) {
+                    $definition->setClass($id);
+                }
+
+                $definition->setClass($definition->getClass() . 'HookProxy');
+
                 $definition->addArgument(new Reference('event_dispatcher'));
             }
-        }
-
-        if ($needRefresh) {
-            if (PHP_SAPI !== 'cli') {
-                header('Location: ' . $_SERVER['REQUEST_URI']);
-                exit();
-            }
-
-            echo 'Generated Hooks. To ensure anything works correctly. Please restart the command again!'. PHP_EOL;
-            exit();
         }
     }
 }

@@ -2,14 +2,13 @@
 
 namespace Shyim\Hooks\Container;
 
-
 use PhpParser\BuilderFactory;
 use PhpParser\Node\Expr\Assign;
 use PhpParser\Node\Identifier;
 use PhpParser\Node\Scalar\String_;
 use PhpParser\Node\Stmt\Class_;
 use PhpParser\Node\Stmt\ClassMethod;
-use PhpParser\Node\Stmt\Echo_;
+use PhpParser\Node\Stmt\Declare_;
 use PhpParser\Node\Stmt\Expression;
 use PhpParser\Node\Stmt\If_;
 use PhpParser\Node\Stmt\Return_;
@@ -18,19 +17,18 @@ use PhpParser\ParserFactory;
 use PhpParser\PrettyPrinter\Standard;
 use Shyim\Hooks\Event\AfterHook;
 use Shyim\Hooks\Event\BeforeHook;
+use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
 class HookBuilder
 {
-    private $cacheDir;
+    private string $cacheDir;
+
+    private Filesystem $filesystem;
 
     public function __construct(string $cacheDir)
     {
-        $cacheDir .= '/hooks/';
-        if (!file_exists($cacheDir)) {
-            mkdir($cacheDir);
-        }
-
+        $this->filesystem = new Filesystem();
         $this->cacheDir = $cacheDir;
     }
 
@@ -41,29 +39,34 @@ class HookBuilder
         $builder = new BuilderFactory();
         $printer = new Standard();
 
-        $initFile = dirname($this->cacheDir, 2) . '/hook.php';
-        file_put_contents($initFile, '<?php' . PHP_EOL);
-        $didChangedSomething = false;
+        $hookFile = $this->cacheDir . '/hook.php';
+
+        $code = '';
 
         foreach ($classes as $className => $filePath) {
-            $list = explode('\\', $className);
-            $lastPart = array_pop($list);
-
-            $path = $this->cacheDir . implode(DIRECTORY_SEPARATOR, $list);
-            $hookCachePath = $path . '/' . $lastPart . '.php';
-
-            // We have already a hook
-            if (file_exists($hookCachePath)) {
-                continue;
-            }
-
             $stmts = $parser->parse(file_get_contents($filePath));
 
-            /** @var Class_ $class */
-            $class = $nodeFinder->findFirstInstanceOf($stmts, Class_::class);
-            array_unshift($class->stmts, $builder->property('shyimEventDispatcher')->getNode());
+            $parts = explode('\\', $className);
 
-            $propertyFetch = $builder->propertyFetch($builder->var('this'), 'shyimEventDispatcher');
+            foreach ($stmts as $key => $stmt) {
+                if ($stmt instanceof Declare_) {
+                    unset($stmts[$key]);
+                }
+            }
+
+            $stmts = array_values($stmts);
+
+            /** @var Class_ $class */
+
+            $class = $nodeFinder->findFirstInstanceOf($stmts, Class_::class);
+
+            $class->name = new Identifier($parts[count($parts) - 1] . 'HookProxy');
+
+            $class->extends = new Identifier('\\' . $className);
+
+            array_unshift($class->stmts, $builder->property('__internal_eventDispatcher')->getNode());
+
+            $propertyFetch = $builder->propertyFetch($builder->var('this'), '__internal_eventDispatcher');
 
             $methods = $nodeFinder->findInstanceOf($stmts, ClassMethod::class);
             $didAddedConstructor = false;
@@ -74,10 +77,10 @@ class HookBuilder
                 $canHaveReturn = $method->returnType instanceof Identifier && $method->returnType->name === 'void';
 
                 if ($name === '__construct' && !$didAddedConstructor) {
-                    $param = $builder->param('shyimEventDispatcher')->getNode();
+                    $param = $builder->param('__internal_eventDispatcher')->getNode();
                     $param->type = new Identifier('\\' . EventDispatcherInterface::class);
                     $method->params[] = $param;
-                    $method->stmts[] = new Expression(new Assign($propertyFetch, $builder->var('shyimEventDispatcher')));
+                    $method->stmts[] = new Expression(new Assign($propertyFetch, $builder->var('__internal_eventDispatcher')));
                     $didAddedConstructor = true;
                 } else {
                     // After Event
@@ -97,7 +100,7 @@ class HookBuilder
                     $arg = $builder->new('\\' . BeforeHook::class, [$builder->funcCall('func_get_args'), $builder->var('this')]);
                     $eventName = $className . '::' . (string) $method->name . '::before';
 
-                    $event = $builder->var('shyimEventDispatcherEvent');
+                    $event = $builder->var('__internal_eventDispatcher');
                     $newStmt = new Expression(new Assign($event, $builder->methodCall($propertyFetch, 'dispatch', [$arg, new String_($eventName)])));
 
                     $ret = new Return_($builder->methodCall($event, 'getReturn'));
@@ -112,7 +115,7 @@ class HookBuilder
                     foreach ($method->params as $i => $param) {
                         $paramCondition = new If_($builder->methodCall($event, 'hasArgument', [$i]));
                         $paramCondition->stmts = [
-                            new Expression(new Assign($param->var, $builder->methodCall($event, 'getArgument', [$i])))
+                            new Expression(new Assign($param->var, $builder->methodCall($event, 'getArgument', [$i]))),
                         ];
 
                         array_unshift($method->stmts, $paramCondition);
@@ -123,15 +126,11 @@ class HookBuilder
                 }
             }
 
-            if (!file_exists($path)) {
-                mkdir($path, 0777, true);
-            }
-
-            file_put_contents($hookCachePath, $printer->prettyPrintFile($stmts));
-            file_put_contents($initFile, sprintf('require_once "%s";', $hookCachePath), FILE_APPEND);
-            $didChangedSomething = true;
+            $code .= mb_substr($printer->prettyPrintFile($stmts), 5);
         }
 
-        return $didChangedSomething;
+        $this->filesystem->dumpFile($hookFile, '<?php ' . $code);
+
+        return false;
     }
 }

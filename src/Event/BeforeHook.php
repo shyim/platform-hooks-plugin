@@ -7,20 +7,13 @@ use Symfony\Contracts\EventDispatcher\Event;
 
 class BeforeHook extends Event
 {
-    /**
-     * @var mixed
-     */
-    private $return;
+    private mixed $return;
 
-    /**
-     * @var array
-     */
-    private $arguments;
+    private array $arguments;
 
-    /**
-     * @var object
-     */
-    private $subject;
+    private object $subject;
+
+    private bool $hasReturn = false;
 
     public function __construct(array $arguments, object $subject)
     {
@@ -28,14 +21,12 @@ class BeforeHook extends Event
         $this->subject = $subject;
     }
 
-    private $hasReturn = false;
-
-    public function getReturn()
+    public function getReturn(): object
     {
         return $this->return;
     }
 
-    public function setReturn($return)
+    public function setReturn(object $return): void
     {
         $this->hasReturn = true;
         $this->return = $return;
@@ -53,7 +44,7 @@ class BeforeHook extends Event
 
     public function hasArgument(int $index): bool
     {
-        return array_key_exists($index, $this->arguments);
+        return \array_key_exists($index, $this->arguments);
     }
 
     public function getArgument(int $index)
@@ -62,7 +53,7 @@ class BeforeHook extends Event
             return $this->arguments[$index];
         }
 
-        throw new InvalidArgumentIndexException(sprintf('Index %d does not exists', $index));
+        throw new InvalidArgumentIndexException(\sprintf('Index %d does not exists', $index));
     }
 
     public function setArgument(int $index, $value): void

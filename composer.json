@@ -1,21 +1,15 @@
 {
-  "name": "shyim/hooks",
-  "description": "Hook any class in the container",
-  "type": "shopware-platform-plugin",
-  "license": "MIT",
-  "autoload": {
-    "psr-4": {
-      "Shyim\\Hooks\\": "src/"
+    "name": "shyim/symfony-hooks",
+    "description": "Hook any class in the container",
+    "type": "library",
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "Shyim\\Hooks\\": "src/"
+        }
+    },
+    "require": {
+        "nikic/php-parser": "*",
+        "symfony/filesystem": "^7.0 || ^6.0"
     }
-  },
-  "extra": {
-    "shopware-plugin-class": "Shyim\\Hooks\\Hooks",
-    "label": {
-      "de-DE": "Hooks",
-      "en-GB": "Hooks"
-    }
-  },
-  "require": {
-    "nikic/php-parser": "^4.3"
-  }
 }
